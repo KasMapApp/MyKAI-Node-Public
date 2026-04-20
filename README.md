@@ -1,2 +1,2 @@
 # MyKAI-Node-Public
-MyKAI Node is a one-click Kaspa node for non-technical people.
+MyKAI Node is an one-click Kaspa node for non-technical people.
