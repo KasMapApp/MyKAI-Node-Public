@@ -51,9 +51,26 @@ ACCOUNT_KEY="${MYKAI_ACCOUNT_KEY:-}"
 # is what left ARM hosts with "no matching manifest for linux/arm64/v8". If the
 # pinned tag is amd64-only, the preflight below stops ARM hosts with that
 # explanation instead of letting compose fail halfway through.
+#
+# kaspad 2.1.0 (2026-09-23). Upstream asked every node, mining and
+# infrastructure operator to move: chunked IBD under P2P protocol 11, stricter
+# wire limits, and a stratum-bridge socket-leak fix. Protocol 11 negotiates
+# down to 10, so a stale pin is compatible rather than broken -- but amd64 sat
+# on 2.0.0 for three months, a release behind even what the Windows app shipped
+# before 2.1.0, because nothing here bumps itself.
+#
+# The amd64 image is OURS and its build context is cloud-monitor/kaspad/
+# (recreated 2026-09-23 -- the original went missing). Rebuild and push BEFORE
+# moving the pin below, or every new install fails on a tag that is not there:
+#
+#   docker build --platform linux/amd64 #     --build-arg KASPAD_VERSION=<v> --build-arg KASPAD_SHA256=<sha of the zip> #     -t kasmap/kaspad:<v> cloud-monitor/kaspad && docker push kasmap/kaspad:<v>
+#
+# ARM stays on supertypo's community image; v2.1.0 was verified to keep the
+# same entrypoint wrapper, RUSTY_HOME=/app/data and uid, so the branch below
+# still holds.
 MONITOR_IMAGE="kasmap/mykai-headless:0.5.1"
-KASPAD_IMAGE_AMD64="kasmap/kaspad:2.0.0"
-KASPAD_IMAGE_ARM64="supertypo/rusty-kaspad:v2.0.1"
+KASPAD_IMAGE_AMD64="kasmap/kaspad:2.1.0"
+KASPAD_IMAGE_ARM64="supertypo/rusty-kaspad:v2.1.0"
 
 say() { printf '\033[1;36m[MyKAI]\033[0m %s\n' "$1"; }
 fail() { printf '\033[1;31m[MyKAI] %s\033[0m\n' "$1" >&2; exit 1; }
