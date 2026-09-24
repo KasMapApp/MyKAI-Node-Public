@@ -248,6 +248,23 @@ is_wsl() {
   [ -n "${WSL_DISTRO_NAME:-}" ] || [ -d /run/WSL ]
 }
 
+# Docker can be installed and still missing from this shell's PATH:
+# /usr/local/bin, where a Synology and plenty of manual installs keep it, is
+# left out of some PATHs (non-interactive ssh, `su -` on busybox). Look in the
+# usual places before deciding it's not there, because the fallback --
+# Docker's own installer -- must never run over a Docker that exists.
+find_docker() {
+  if command -v docker >/dev/null 2>&1; then return 0; fi
+  for d in /usr/local/bin /usr/bin /snap/bin /usr/local/sbin /usr/sbin; do
+    if [ -x "$d/docker" ]; then
+      PATH="$d:$PATH"
+      export PATH
+      return 0
+    fi
+  done
+  return 1
+}
+
 # A NAS ships Docker as an app of its own. Docker's Linux installer would
 # refuse it or fight the vendor's package, so these get pointed at the app.
 nas_hint() {
@@ -285,6 +302,13 @@ install_docker() {
   fi
 
   get_sudo "Installing Docker needs admin rights."
+  # Last look, through root's PATH, before installing anything.
+  root_docker=$(as_root sh -c 'command -v docker' 2>/dev/null) || root_docker=""
+  if [ -n "$root_docker" ]; then
+    PATH="$(dirname "$root_docker"):$PATH"
+    export PATH
+    return 0
+  fi
   say "Docker isn't installed yet. Installing it with Docker's own installer"
   say "(get.docker.com, always the newest release). This takes a few minutes…"
   if ! fetch https://get.docker.com "$WORK_DIR/get-docker.sh"; then
@@ -744,7 +768,7 @@ main() {
   # gets installed on it.
   detect_arch
 
-  if ! command -v docker >/dev/null 2>&1; then
+  if ! find_docker; then
     install_docker
   fi
   setup_docker_access
