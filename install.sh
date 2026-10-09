@@ -7,17 +7,10 @@
 # Or with a specific account key (unify stats with an existing desktop install):
 #   curl -fsSL https://mykai.dev/install.sh | MYKAI_ACCOUNT_KEY=acc_<32hex> bash
 #
-# The older form keeps working:
-#   bash <(curl -fsSL https://mykai.dev/install.sh)
-#
 # No sudo needed in front. When this user can't use Docker, the script asks
-# for admin rights itself, once, and says why. Putting sudo in front of the
-# `bash <(...)` form breaks it outright: sudo closes the /dev/fd pipe that
-# <(...) hands to bash, so bash stops with "/dev/fd/63: No such file or
-# directory" before a single line of this file runs. Nothing in here can catch
-# that, which is why the pipe form above is the one we show. `curl ... | sudo
-# bash` works too. A key that has to pass through sudo goes as an argument,
-# because sudo drops environment variables set in front of it:
+# for admin rights itself, once, and says why. `curl ... | sudo bash` works
+# too. A key that has to pass through sudo goes as an argument, because sudo
+# drops environment variables set in front of it:
 #   curl -fsSL https://mykai.dev/install.sh | sudo bash -s -- --key acc_<32hex>
 #
 # What this script does:
@@ -36,17 +29,14 @@
 #   7. Prints the final account key + container status
 #
 # Architectures:
-#   x86_64 / amd64   — kasmap/kaspad, our own Toccata-ready build
-#   aarch64 / arm64  — supertypo/rusty-kaspad. Community-built from the same
-#                      rusty-kaspa source and published multi-arch. We don't
-#                      ship an ARM kaspad of our own yet, and cross-building
-#                      Rust for ARM isn't worth duplicating a maintained image
-#                      for. Covers Raspberry Pi 5, ARM NAS, Ampere/Graviton.
+#   x86_64 / amd64   — kasmap/kaspad, MyKAI's own kaspad image
+#   aarch64 / arm64  — supertypo/rusty-kaspad, a community image built from the
+#                      same rusty-kaspa source. Covers Raspberry Pi 5, ARM NAS,
+#                      Ampere/Graviton.
 #   Anything else (32-bit ARM, i386) is refused with an explanation.
 #
-# Idempotent: safe to re-run. Re-running upgrades both images to the versions
-# pinned in this script and restarts the stack. The persisted accountKey + chain data survive the upgrade
-# (both stored in named docker volumes).
+# Safe to re-run: it brings both images up to the versions pinned below. The
+# account key and chain data are kept.
 #
 # Uninstall:
 #   cd ~/.mykai-node && docker compose down -v   # removes containers + data
@@ -64,46 +54,14 @@ ACCOUNT_KEY="${MYKAI_ACCOUNT_KEY:-}"
 HELP_URL="https://mykai.dev/linux/setup"
 
 # ─── Image pins ─────────────────────────────────────────────────────────────
-# One place to bump. MONITOR_IMAGE must exist on Docker Hub as a multi-arch
-# (amd64 + arm64) manifest — build it with:
-#
-#   docker buildx build --platform linux/amd64,linux/arm64 \
-#     -f Dockerfile.headless -t kasmap/mykai-headless:<tag> --push .
-#
-# A plain `docker build` publishes only the builder's own architecture, which
-# is what left ARM hosts with "no matching manifest for linux/arm64/v8". If the
-# pinned tag is amd64-only, the preflight below stops ARM hosts with that
-# explanation instead of letting compose fail halfway through.
-#
-# kaspad 2.1.0 (2026-09-23). Upstream asked every node, mining and
-# infrastructure operator to move: chunked IBD under P2P protocol 11, stricter
-# wire limits, and a stratum-bridge socket-leak fix. Protocol 11 negotiates
-# down to 10, so a stale pin is compatible rather than broken -- but amd64 sat
-# on 2.0.0 for three months, a release behind even what the Windows app shipped
-# before 2.1.0, because nothing here bumps itself.
-#
-# The amd64 image is OURS and its build context is cloud-monitor/kaspad/
-# (recreated 2026-09-23 -- the original went missing). Rebuild and push BEFORE
-# moving the pin below, or every new install fails on a tag that is not there:
-#
-#   docker build --platform linux/amd64 #     --build-arg KASPAD_VERSION=<v> --build-arg KASPAD_SHA256=<sha of the zip> #     -t kasmap/kaspad:<v> cloud-monitor/kaspad && docker push kasmap/kaspad:<v>
-#
-# 2.1.0-1 is the same kaspad plus an entrypoint that announces the node's
-# address (--externalip) once mykai.dev confirms its port is open from outside.
-# Before it, amd64 Docker nodes never announced one and got no inbound peers
-# at all; ARM always did, blindly. See cloud-monitor/kaspad/entrypoint.sh.
-#
-# ARM stays on supertypo's community image; v2.1.0 was verified to keep the
-# same entrypoint wrapper, RUSTY_HOME=/app/data and uid, so the branch below
-# still holds.
+# Each tag must already be on Docker Hub, the monitor's as a multi-arch
+# (amd64 + arm64) image.
 MONITOR_IMAGE="kasmap/mykai-headless:0.5.1"
 KASPAD_IMAGE_AMD64="kasmap/kaspad:2.1.0-1"
 KASPAD_IMAGE_ARM64="supertypo/rusty-kaspad:v2.1.0"
 
-# Disk sizing. A synced node's data is normally 50-65 GB, but it swells when
-# the network is busy: Seb's node went to almost 120 GB during the TPS
-# world-record attempt (the one that worked). 200 GB free leaves room for the
-# next one.
+# Disk sizing. A synced node normally uses 50-65 GB, and close to 120 GB when
+# the network is very busy. 200 GB free leaves room for that.
 DISK_PEAK_GB=120
 DISK_SAFE_GB=200
 
@@ -343,9 +301,6 @@ install_docker() {
 #
 # Three things stand between an installed Docker and a working one: the
 # daemon can be stopped, this user can lack access to its socket, or both.
-# Before this, a socket "permission denied" fell into the pull step's
-# "not on Docker Hub, that's a bug in this installer" branch -- the wrong
-# message for the most common non-root setup.
 
 DOCKER_BIN=""
 DOCKER=""
@@ -571,12 +526,8 @@ resolve_account_key() {
 #
 # Doing this before compose runs means a missing or wrong-architecture image
 # produces one clear sentence instead of a half-created stack and a raw
-# registry error. Both failure modes below have actually happened: a stale
-# image name that wasn't on Hub, and an amd64-only manifest on a Pi 5.
-#
-# The "not on Hub" branch matches registry wording only. It used to match a
-# bare "denied", which also caught the socket's "permission denied" and told
-# people the installer had a bug when their user just couldn't reach Docker.
+# registry error. The "not on Hub" branch matches registry wording only, so a
+# socket "permission denied" never ends up there.
 
 pull_image() {
   image="$1"
@@ -680,7 +631,7 @@ $KASPAD_ENTRY_ARG      # --yes auto-confirms kaspad's y/n prompts (the one-way D
       - --listen=0.0.0.0:16111
       - --rpclisten-borsh=0.0.0.0:17110
       - --rpclisten-json=0.0.0.0:18110
-      # Outbound peer count — matches MyKAI Node desktop default (v0.4.3+)
+      # Outbound peer count — matches MyKAI Node desktop default
       # for a consistent network-load profile across the MyKAI fleet.
       # NAS / VPS operators who want more (mining, observatory) can edit
       # this line in ~/.mykai-node/docker-compose.yml and run
@@ -821,8 +772,7 @@ main() {
   say "  • Stop + wipe data:    $COMPOSE_SHOW -f $COMPOSE_FILE_PATH down -v"
   say "  • Update later:        run the install command again"
   say ""
-  # "My Nodes" is a list in the Windows app, not a page on mykai.dev. This
-  # used to send people looking for it on the website.
+  # "My Nodes" is a list in the Windows app, not a page on mykai.dev.
   say "Within a few minutes your node counts in the live total on https://mykai.dev"
   say "Also run the MyKAI Windows app? Install with its account key and this"
   say "server shows up under My Nodes in the app."
