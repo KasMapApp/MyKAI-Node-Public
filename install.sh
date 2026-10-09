@@ -88,11 +88,16 @@ HELP_URL="https://mykai.dev/linux/setup"
 #
 #   docker build --platform linux/amd64 #     --build-arg KASPAD_VERSION=<v> --build-arg KASPAD_SHA256=<sha of the zip> #     -t kasmap/kaspad:<v> cloud-monitor/kaspad && docker push kasmap/kaspad:<v>
 #
+# 2.1.0-1 is the same kaspad plus an entrypoint that announces the node's
+# address (--externalip) once mykai.dev confirms its port is open from outside.
+# Before it, amd64 Docker nodes never announced one and got no inbound peers
+# at all; ARM always did, blindly. See cloud-monitor/kaspad/entrypoint.sh.
+#
 # ARM stays on supertypo's community image; v2.1.0 was verified to keep the
 # same entrypoint wrapper, RUSTY_HOME=/app/data and uid, so the branch below
 # still holds.
 MONITOR_IMAGE="kasmap/mykai-headless:0.5.1"
-KASPAD_IMAGE_AMD64="kasmap/kaspad:2.1.0"
+KASPAD_IMAGE_AMD64="kasmap/kaspad:2.1.0-1"
 KASPAD_IMAGE_ARM64="supertypo/rusty-kaspad:v2.1.0"
 
 # Disk sizing. A synced node's data is normally 50-65 GB, but it swells when
@@ -215,7 +220,8 @@ detect_arch() {
     x86_64|amd64)
       DOCKER_ARCH="amd64"
       KASPAD_IMAGE="$KASPAD_IMAGE_AMD64"
-      # Our own image: the entrypoint IS the kaspad binary, appdir at /data.
+      # Our own image: takes kaspad flags only (its entrypoint runs the
+      # binary, adding --externalip when the port is open), appdir at /data.
       KASPAD_APPDIR="/data"
       ;;
     aarch64|arm64)
@@ -640,8 +646,8 @@ KEY_EOF
   # kaspad's command list differs by image. supertypo's entrypoint is a wrapper
   # script that expects the binary name as its first argument (it matches on
   # ^kaspad to decide whether to resolve and inject --externalip), so on ARM the
-  # list starts with a bare `kaspad`. Our own image's entrypoint IS the binary,
-  # so its list starts at the first flag. Everything after that is identical.
+  # list starts with a bare `kaspad`. Our own image takes flags only, so its
+  # list starts at the first flag. Everything after that is identical.
   if [ "$DOCKER_ARCH" = "arm64" ]; then
     KASPAD_ENTRY_ARG="      - kaspad
 "
